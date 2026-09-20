@@ -1,0 +1,3 @@
+[submodule "models/bge-small-zh-v1.5"]
+	path = models/bge-small-zh-v1.5
+	url = https://huggingface.co/BAAI/bge-small-zh-v1.5
