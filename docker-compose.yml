@@ -1,5 +1,22 @@
 name: saizhijian
 
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://saizhijian:saizhijian@postgres:5432/saizhijian
+  JWT_SECRET: ${JWT_SECRET}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  COMPETITION_DB_PATH: /data/saikr_competitions.db
+  EMBEDDING_MODEL_PATH: /models/bge-small-zh-v1.5
+  QDRANT_URL: http://qdrant:6333
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-competitions_bge_small_zh_v15}
+  QDRANT_ALIAS: ${QDRANT_ALIAS:-competitions_current}
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  BACKUP_DIR: /data/backups
+  INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
+  INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+
 services:
   postgres:
     image: postgres:18.4
@@ -19,5 +36,91 @@ services:
       timeout: 3s
       retries: 20
 
+  redis:
+    image: redis:7.4-alpine
+    container_name: saizhijian-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - saizhijian_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    container_name: saizhijian-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QDRANT_HOST_PORT:-6333}:6333"
+    volumes:
+      - saizhijian_qdrant:/qdrant/storage
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: saizhijian-api
+    restart: unless-stopped
+    environment: *app-environment
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/data:ro
+      - ./models:/models:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: saizhijian-worker
+    restart: unless-stopped
+    environment: *app-environment
+    command: ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=1"]
+    volumes:
+      - ./:/data
+      - ./models:/models:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: saizhijian-beat
+    restart: unless-stopped
+    environment: *app-environment
+    command: ["celery", "-A", "app.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    volumes:
+      - ./:/data:ro
+      - ./models:/models:ro
+    depends_on:
+      worker:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
 volumes:
   saizhijian_pgdata18:
+  saizhijian_redis:
+  saizhijian_qdrant:

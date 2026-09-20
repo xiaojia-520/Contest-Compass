@@ -123,6 +123,22 @@ class PageResult:
     updated: int
     details: int
     errors: int
+    changed_ids: list[int]
+
+
+@dataclass
+class CrawlSummary:
+    run_id: int
+    status: str
+    pages_fetched: int
+    items_seen: int
+    items_inserted: int
+    items_updated: int
+    details_fetched: int
+    error_count: int
+    inactivated: int
+    changed_ids: list[int]
+    stopped_reason: str
 
 
 class SaikrCrawler:
@@ -285,8 +301,8 @@ class SaikrCrawler:
 
         before = self.conn.execute(
             """
-            SELECT contest_name, status_code, register_end_at, contest_start_at,
-                   content_hash
+            SELECT contest_name, status_code, can_register, register_end_at,
+                   contest_start_at, content_hash
             FROM competitions WHERE contest_id = ?
             """,
             (contest_id,),
@@ -353,9 +369,18 @@ class SaikrCrawler:
         if before is not None:
             new_signature = (
                 values["contest_name"],
-                values["status_code"],
-                values["register_end_at"],
-                values["contest_start_at"],
+                values["status_code"]
+                if values["status_code"] is not None
+                else before["status_code"],
+                values["can_register"]
+                if values["can_register"] is not None
+                else before["can_register"],
+                values["register_end_at"]
+                if values["register_end_at"] is not None
+                else before["register_end_at"],
+                values["contest_start_at"]
+                if values["contest_start_at"] is not None
+                else before["contest_start_at"],
                 values["content_hash"] or before["content_hash"],
             )
             old_signature = tuple(before)
@@ -492,6 +517,7 @@ class SaikrCrawler:
 
         fetched_at = now_ts()
         inserted = updated = details = 0
+        changed_ids: list[int] = []
         with self.conn:
             for item in items:
                 contest_id = int(item["contest_id"])
@@ -502,6 +528,8 @@ class SaikrCrawler:
                 inserted += int(was_inserted)
                 updated += int(was_updated)
                 details += int(detail is not None)
+                if was_inserted or was_updated:
+                    changed_ids.append(contest_id)
 
             self.conn.execute(
                 """
@@ -528,7 +556,7 @@ class SaikrCrawler:
             f"  已落库：新增 {inserted}，更新 {updated}，详情 {details}，失败 {len(errors)}"
         )
         return (
-            PageResult(page, len(items), inserted, updated, details, len(errors)),
+            PageResult(page, len(items), inserted, updated, details, len(errors), changed_ids),
             total_pages,
         )
 
@@ -537,7 +565,8 @@ class SaikrCrawler:
         *,
         start_page: int,
         max_pages: int | None,
-    ) -> None:
+        stop_after_unchanged_pages: int | None = None,
+    ) -> CrawlSummary:
         run_started = now_ts()
         cursor = self.conn.execute(
             "INSERT INTO crawl_runs (started_at, status, start_page) VALUES (?, 'running', ?)",
@@ -552,6 +581,12 @@ class SaikrCrawler:
         processed = 0
         final_status = "success"
         final_error: str | None = None
+        stopped_reason = "all_pages"
+        completed_all_pages = False
+        unchanged_pages = 0
+        items_seen = items_inserted = items_updated = details_fetched = error_count = 0
+        inactivated = 0
+        changed_ids: set[int] = set()
 
         try:
             async with aiohttp.ClientSession(
@@ -562,10 +597,29 @@ class SaikrCrawler:
                 total_pages: int | None = None
                 while total_pages is None or page <= total_pages:
                     if max_pages is not None and processed >= max_pages:
+                        stopped_reason = "max_pages"
                         break
                     result, total_pages = await self.process_page(session, page, run_id)
                     processed += 1
+                    items_seen += result.seen
+                    items_inserted += result.inserted
+                    items_updated += result.updated
+                    details_fetched += result.details
+                    error_count += result.errors
+                    changed_ids.update(result.changed_ids)
                     if result.seen == 0:
+                        stopped_reason = "empty_page"
+                        break
+                    if result.inserted == 0 and result.updated == 0:
+                        unchanged_pages += 1
+                    else:
+                        unchanged_pages = 0
+                    if page >= total_pages:
+                        completed_all_pages = True
+                        stopped_reason = "all_pages"
+                        break
+                    if stop_after_unchanged_pages and unchanged_pages >= stop_after_unchanged_pages:
+                        stopped_reason = "unchanged_pages"
                         break
                     page += 1
                     if page <= total_pages and (
@@ -573,6 +627,19 @@ class SaikrCrawler:
                     ):
                         print(f"  等待 {self.page_delay:g} 秒后进入下一页……")
                         await asyncio.sleep(self.page_delay)
+
+            is_full_run = start_page == 1 and max_pages is None and stop_after_unchanged_pages is None
+            if is_full_run and completed_all_pages and items_seen > 0:
+                with self.conn:
+                    cursor = self.conn.execute(
+                        """
+                        UPDATE competitions
+                        SET is_active = 0, removed_at = ?, updated_at = ?
+                        WHERE is_active = 1 AND last_seen_at < ?
+                        """,
+                        (now_ts(), now_ts(), run_started),
+                    )
+                    inactivated = max(0, cursor.rowcount)
         except KeyboardInterrupt:
             final_status = "partial"
             final_error = "用户中断"
@@ -591,6 +658,20 @@ class SaikrCrawler:
                     """,
                     (now_ts(), final_status, final_error, run_id),
                 )
+
+        return CrawlSummary(
+            run_id=run_id,
+            status=final_status,
+            pages_fetched=processed,
+            items_seen=items_seen,
+            items_inserted=items_inserted,
+            items_updated=items_updated,
+            details_fetched=details_fetched,
+            error_count=error_count,
+            inactivated=inactivated,
+            changed_ids=sorted(changed_ids),
+            stopped_reason=stopped_reason,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import 'project_workspace.dart';
 import 'settings_screen.dart';
+import 'admin_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.state});
@@ -24,9 +25,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 860;
-        final content = selected == 0
-            ? ProjectsPage(state: widget.state)
-            : SettingsScreen(state: widget.state);
+        final isAdmin = widget.state.user?['is_admin'] == true;
+        final content = switch (selected) {
+          0 => ProjectsPage(state: widget.state),
+          1 => SettingsScreen(state: widget.state),
+          2 when isAdmin => AdminScreen(state: widget.state),
+          _ => ProjectsPage(state: widget.state),
+        };
         return Scaffold(
           appBar: wide
               ? null
@@ -49,16 +54,21 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() => selected = value);
                     Navigator.pop(context);
                   },
-                  children: const [
-                    SizedBox(height: 16),
-                    NavigationDrawerDestination(
+                  children: [
+                    const SizedBox(height: 16),
+                    const NavigationDrawerDestination(
                       icon: Icon(Icons.grid_view_rounded),
                       label: Text('我的项目'),
                     ),
-                    NavigationDrawerDestination(
+                    const NavigationDrawerDestination(
                       icon: Icon(Icons.tune_rounded),
                       label: Text('模型设置'),
                     ),
+                    if (isAdmin)
+                      const NavigationDrawerDestination(
+                        icon: Icon(Icons.admin_panel_settings_outlined),
+                        label: Text('任务管理'),
+                      ),
                   ],
                 ),
           body: Row(
@@ -82,6 +92,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         selected: selected == 0,
                         onTap: () => setState(() => selected = 0),
                       ),
+                      if (isAdmin) ...[
+                        const SizedBox(height: 8),
+                        _NavItem(
+                          icon: Icons.admin_panel_settings_outlined,
+                          label: '任务管理',
+                          selected: selected == 2,
+                          onTap: () => setState(() => selected = 2),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       _NavItem(
                         icon: Icons.tune_rounded,

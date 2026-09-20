@@ -1,0 +1,15 @@
+.git
+.env
+.venv
+.tools
+.artifacts
+.pytest_cache
+**/__pycache__
+**/*.pyc
+**/.dart_tool
+models
+backups
+*.db
+*.db-shm
+*.db-wal
+crawl-*.log

@@ -6,8 +6,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
+from .admin_api import router as admin_router
 from .config import get_settings
-from .database import init_db
+from .database import ensure_initial_admin, init_db
 
 
 settings = get_settings()
@@ -16,6 +17,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    ensure_initial_admin()
     yield
 
 
@@ -28,6 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router)
+app.include_router(admin_router)
 
 
 if settings.frontend_build_path.exists():
@@ -41,4 +44,3 @@ if settings.frontend_build_path.exists():
         if candidate.is_file() and settings.frontend_build_path.resolve() in candidate.parents:
             return FileResponse(candidate)
         return FileResponse(settings.frontend_build_path / "index.html")
-

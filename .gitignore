@@ -10,6 +10,8 @@ __pycache__/
 *.db-wal
 crawl-*.log
 crawl-*.err.log
+backups/
+celerybeat-schedule*
 frontend/.dart_tool/
 frontend/build/
 frontend/.flutter-plugins*

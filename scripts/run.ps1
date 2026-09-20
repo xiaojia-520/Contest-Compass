@@ -13,7 +13,8 @@ if (-not (Test-Path '.venv\Scripts\python.exe')) {
     throw 'Missing Python virtual environment. Run scripts\setup.ps1 first.'
 }
 
-docker compose up -d postgres
+docker compose up -d postgres redis
+& '.venv\Scripts\python.exe' -m alembic -c 'alembic.ini' upgrade head
 Write-Host "Saizhijian is listening on IPv6 port $Port." -ForegroundColor Cyan
 Write-Host "Local URL: http://localhost:$Port"
 Write-Host 'Configure a domain and HTTPS before public access. Never send real API keys over plain HTTP.' -ForegroundColor Yellow

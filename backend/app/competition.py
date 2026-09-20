@@ -52,6 +52,33 @@ class CompetitionRepository:
             ).fetchall()
         return [self._index_row(row) for row in rows]
 
+    def get_for_index(self, ids: Iterable[int]) -> list[dict]:
+        wanted = list(dict.fromkeys(int(item) for item in ids))
+        if not wanted:
+            return []
+        marks = ",".join("?" for _ in wanted)
+        where, params = self._eligible_where()
+        with self._connect() as con:
+            rows = con.execute(
+                f"""
+                SELECT contest_id, contest_name, level_name, category_second_code,
+                       register_end_at, contest_start_at, source_url, content_text
+                FROM competitions
+                WHERE contest_id IN ({marks}) AND {where}
+                """,
+                (*wanted, *params),
+            ).fetchall()
+        by_id = {row["contest_id"]: self._index_row(row) for row in rows}
+        return [by_id[item] for item in wanted if item in by_id]
+
+    def counts(self) -> dict[str, int]:
+        where, params = self._eligible_where()
+        with self._connect() as con:
+            total = con.execute("SELECT COUNT(*) FROM competitions").fetchone()[0]
+            active = con.execute("SELECT COUNT(*) FROM competitions WHERE is_active=1").fetchone()[0]
+            eligible = con.execute(f"SELECT COUNT(*) FROM competitions WHERE {where}", params).fetchone()[0]
+        return {"total": int(total), "active": int(active), "eligible": int(eligible)}
+
     def get_many(self, ids: Iterable[int]) -> list[dict]:
         wanted = list(dict.fromkeys(int(item) for item in ids))
         if not wanted:
@@ -114,4 +141,3 @@ class CompetitionRepository:
             "source_url": row["source_url"],
             "content_excerpt": content[:1800],
         }
-

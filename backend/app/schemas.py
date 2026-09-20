@@ -20,6 +20,7 @@ class UserOut(BaseModel):
     id: int
     username: str
     email: str | None
+    is_admin: bool = False
     created_at: datetime
 
 
@@ -133,3 +134,35 @@ class UsageOut(BaseModel):
     success: bool
     created_at: datetime
 
+
+class BackgroundJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    task_id: str | None
+    job_type: str
+    trigger: str
+    status: str
+    attempt: int
+    metrics: dict[str, Any]
+    error_type: str | None
+    error_message: str | None
+    requested_by: int | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class AdminOverviewOut(BaseModel):
+    redis_ok: bool
+    worker_ok: bool
+    active_job: BackgroundJobOut | None
+    recent_jobs: list[BackgroundJobOut]
+    competition_total: int
+    competition_active: int
+    competition_eligible: int
+    vector_count: int | None
+    schedules: dict[str, str]
+
+
+class TaskTriggerOut(BaseModel):
+    job: BackgroundJobOut
