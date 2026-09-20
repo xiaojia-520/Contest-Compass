@@ -11,6 +11,7 @@ class AppProject {
     required this.region,
     required this.teamSize,
     required this.weeklyHours,
+    required this.remindersEnabled,
     required this.updatedAt,
   });
 
@@ -25,6 +26,7 @@ class AppProject {
   String region;
   int teamSize;
   int weeklyHours;
+  bool remindersEnabled;
   DateTime updatedAt;
 
   factory AppProject.fromJson(Map<String, dynamic> json) => AppProject(
@@ -39,6 +41,7 @@ class AppProject {
     region: json['region'] as String? ?? '',
     teamSize: json['team_size'] as int? ?? 1,
     weeklyHours: json['weekly_hours'] as int? ?? 5,
+    remindersEnabled: json['reminders_enabled'] as bool? ?? true,
     updatedAt:
         DateTime.tryParse(json['updated_at'] as String? ?? '') ??
         DateTime.now(),
@@ -55,6 +58,7 @@ class AppProject {
     'region': region,
     'team_size': teamSize,
     'weekly_hours': weeklyHours,
+    'reminders_enabled': remindersEnabled,
   };
 }
 

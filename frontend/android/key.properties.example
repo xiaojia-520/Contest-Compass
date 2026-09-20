@@ -1,0 +1,6 @@
+# Copy this file to key.properties and fill in local/CI signing values.
+# Never commit key.properties or the keystore itself.
+storePassword=change-me
+keyPassword=change-me
+keyAlias=upload
+storeFile=../signing/upload-keystore.jks

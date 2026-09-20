@@ -86,3 +86,74 @@ def test_admin_permission_and_manual_enqueue(monkeypatch):
         response = client.post("/api/admin/jobs/incremental", headers=admin_headers)
         assert response.status_code == 202, response.text
         assert response.json()["job"]["task_id"] == "test-celery-task-id"
+
+
+def test_preferences_and_app_release_management():
+    with TestClient(app) as client:
+        account = client.post(
+            "/api/auth/register",
+            json={"username": "release-admin", "password": "strong-pass-123"},
+        ).json()
+        headers = {"Authorization": f"Bearer {account['access_token']}"}
+
+        preferences = client.put(
+            "/api/preferences",
+            headers=headers,
+            json={"reminders_enabled": False},
+        )
+        assert preferences.status_code == 200, preferences.text
+        assert preferences.json() == {"reminders_enabled": False}
+
+        with SessionLocal() as db:
+            user = db.get(User, account["user"]["id"])
+            user.is_admin = True
+            db.commit()
+
+        release = client.post(
+            "/api/admin/app-releases",
+            headers=headers,
+            json={
+                "platform": "windows",
+                "version": "1.2.0",
+                "build_number": 12,
+                "minimum_supported_version": "1.0.0",
+                "release_notes": "跨平台客户端",
+                "download_url": "https://downloads.example.com/saizhijian.exe",
+                "sha256": None,
+                "mandatory": False,
+                "published": True,
+            },
+        )
+        assert release.status_code == 201, release.text
+
+        latest = client.get(
+            "/api/app/releases/latest",
+            params={"platform": "windows", "current_version": "0.9.0"},
+        )
+        assert latest.status_code == 200, latest.text
+        assert latest.json()["version"] == "1.2.0"
+        assert latest.json()["mandatory"] is True
+
+        release_id = release.json()["id"]
+        updated = client.put(
+            f"/api/admin/app-releases/{release_id}",
+            headers=headers,
+            json={
+                **release.json(),
+                "release_notes": "已更新说明",
+                "mandatory": True,
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["release_notes"] == "已更新说明"
+
+        removed = client.delete(
+            f"/api/admin/app-releases/{release_id}", headers=headers
+        )
+        assert removed.status_code == 204, removed.text
+        assert (
+            client.get(
+                "/api/app/releases/latest", params={"platform": "windows"}
+            ).json()
+            is None
+        )

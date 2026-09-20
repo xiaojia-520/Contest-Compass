@@ -24,6 +24,14 @@ class UserOut(BaseModel):
     created_at: datetime
 
 
+class UserPreferencesIn(BaseModel):
+    reminders_enabled: bool
+
+
+class UserPreferencesOut(BaseModel):
+    reminders_enabled: bool
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -63,6 +71,7 @@ class ProjectBase(BaseModel):
     region: str = Field(default="", max_length=120)
     team_size: int = Field(default=1, ge=1, le=100)
     weekly_hours: int = Field(default=5, ge=1, le=168)
+    reminders_enabled: bool = True
 
 
 class ProjectCreate(ProjectBase):
@@ -166,3 +175,45 @@ class AdminOverviewOut(BaseModel):
 
 class TaskTriggerOut(BaseModel):
     job: BackgroundJobOut
+
+
+class ReminderOut(BaseModel):
+    project_id: int
+    project_title: str
+    contest_id: int
+    contest_name: str
+    register_end_at: int
+
+
+class AppReleaseIn(BaseModel):
+    platform: str = Field(pattern=r"^(android|ios|windows|macos|web)$")
+    version: str = Field(min_length=1, max_length=40, pattern=r"^\d+\.\d+\.\d+$")
+    build_number: int = Field(default=1, ge=1)
+    minimum_supported_version: str | None = Field(
+        default=None, max_length=40, pattern=r"^\d+\.\d+\.\d+$"
+    )
+    release_notes: str = Field(default="", max_length=20000)
+    download_url: str = Field(max_length=1000, pattern=r"^https://")
+    sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$"
+    )
+    mandatory: bool = False
+    published: bool = False
+
+
+class AppReleaseOut(AppReleaseIn):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+    published_at: datetime | None
+
+
+class LatestReleaseOut(BaseModel):
+    platform: str
+    version: str
+    build_number: int
+    minimum_supported_version: str | None
+    release_notes: str
+    download_url: str
+    sha256: str | None
+    mandatory: bool

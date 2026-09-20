@@ -19,6 +19,46 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int selected = 0;
+  bool updateChecked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => checkForUpdate());
+  }
+
+  Future<void> checkForUpdate() async {
+    if (updateChecked) return;
+    updateChecked = true;
+    try {
+      final update = await widget.state.updates.check();
+      if (update == null || !mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: !update.mandatory,
+        builder: (context) => PopScope(
+          canPop: !update.mandatory,
+          child: AlertDialog(
+            title: Text('发现新版本 ${update.version}'),
+            content: Text(update.notes.isEmpty ? '新版本已经可以下载。' : update.notes),
+            actions: [
+              if (!update.mandatory)
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('稍后'),
+                ),
+              ElevatedButton(
+                onPressed: () => widget.state.updates.openDownload(update),
+                child: const Text('前往下载'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (_) {
+      // Update checks are best-effort and must not block the application.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +309,7 @@ class ProjectsPage extends StatelessWidget {
                           crossAxisCount: columns,
                           crossAxisSpacing: 18,
                           mainAxisSpacing: 18,
-                          childAspectRatio: 1.42,
+                          childAspectRatio: columns == 1 ? 1.2 : 1.42,
                         ),
                         itemCount: state.projects.length,
                         itemBuilder: (context, index) => ProjectCard(
@@ -421,6 +461,7 @@ class _NewProjectDialogState extends State<NewProjectDialog> {
             'region': '',
             'team_size': 1,
             'weekly_hours': 5,
+            'reminders_enabled': true,
           });
         },
         child: const Text('创建并完善'),

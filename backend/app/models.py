@@ -21,6 +21,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     projects: Mapped[list[Project]] = relationship(back_populates="owner", cascade="all, delete-orphan")
@@ -58,6 +59,7 @@ class Project(Base):
     region: Mapped[str] = mapped_column(String(120), default="")
     team_size: Mapped[int] = mapped_column(Integer, default=1)
     weekly_hours: Mapped[int] = mapped_column(Integer, default=5)
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -132,3 +134,23 @@ class BackgroundJobRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AppRelease(Base):
+    __tablename__ = "app_releases"
+    __table_args__ = (
+        UniqueConstraint("platform", "version", "build_number", name="uq_app_release_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(20), index=True)
+    version: Mapped[str] = mapped_column(String(40))
+    build_number: Mapped[int] = mapped_column(Integer, default=1)
+    minimum_supported_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    release_notes: Mapped[str] = mapped_column(Text, default="")
+    download_url: Mapped[str] = mapped_column(String(1000))
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    mandatory: Mapped[bool] = mapped_column(Boolean, default=False)
+    published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

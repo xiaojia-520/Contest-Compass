@@ -4,7 +4,7 @@
 
 ## 技术结构
 
-- `frontend/`：Flutter Web 中文响应式界面
+- `frontend/`：Flutter Web、Android、iOS、Windows、macOS 中文客户端
 - `backend/`：FastAPI、LiteLLM、SQLAlchemy、Celery
 - PostgreSQL：账号、项目、对话、模型配置和用量记录
 - Redis：Celery 队列、任务锁和重试调度
@@ -35,6 +35,9 @@ bash scripts/run-docker.sh
 ```
 
 `run-docker.ps1` 和 `run-docker.sh` 都会先构建 Flutter Web，再构建并启动容器。
+
+原生客户端的 API 地址、签名、安装包和 CI 构建说明见
+[`docs/client-builds.md`](docs/client-builds.md)。
 
 浏览器访问 <http://localhost:8000>。`setup.ps1` 会：
 

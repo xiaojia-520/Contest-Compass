@@ -6,15 +6,16 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from redis import Redis
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .celery_app import celery_app
 from .competition import CompetitionRepository
 from .config import get_settings
 from .database import get_db
-from .models import BackgroundJobRun, User
+from .models import AppRelease, BackgroundJobRun, User
 from .retrieval import get_retrieval_service
-from .schemas import AdminOverviewOut, BackgroundJobOut, TaskTriggerOut
+from .schemas import AdminOverviewOut, AppReleaseIn, AppReleaseOut, BackgroundJobOut, TaskTriggerOut
 from .security import require_admin
 from .tasks import ACTIVE_STATUSES, full_crawl, incremental_crawl, rebuild_index
 
@@ -52,12 +53,12 @@ def _schedule_text(label: str, next_run: datetime) -> str:
 def overview(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     try:
         redis_ok = bool(Redis.from_url(settings.redis_url).ping())
-    except Exception:
+    except IntegrityError:
         redis_ok = False
     try:
         replies = celery_app.control.inspect(timeout=0.7).ping() or {}
         worker_ok = bool(replies)
-    except Exception:
+    except IntegrityError:
         worker_ok = False
     try:
         vector_count = get_retrieval_service().vector_count()
@@ -128,3 +129,74 @@ def trigger_job(
         db.commit()
         raise HTTPException(status_code=503, detail="任务队列不可用")
     return TaskTriggerOut(job=job)
+
+
+@router.get("/app-releases", response_model=list[AppReleaseOut])
+def list_app_releases(
+    _: User = Depends(require_admin), db: Session = Depends(get_db)
+):
+    return list(
+        db.scalars(
+            select(AppRelease).order_by(AppRelease.created_at.desc()).limit(100)
+        )
+    )
+
+
+@router.post(
+    "/app-releases", response_model=AppReleaseOut, status_code=status.HTTP_201_CREATED
+)
+def create_app_release(
+    payload: AppReleaseIn,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    release = AppRelease(**payload.model_dump())
+    if release.published:
+        release.published_at = datetime.now(ZoneInfo("UTC"))
+    db.add(release)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该平台版本和构建号已存在")
+    db.refresh(release)
+    return release
+
+
+@router.put("/app-releases/{release_id}", response_model=AppReleaseOut)
+def update_app_release(
+    release_id: int,
+    payload: AppReleaseIn,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    release = db.get(AppRelease, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="版本记录不存在")
+    was_published = release.published
+    for key, value in payload.model_dump().items():
+        setattr(release, key, value)
+    if release.published and not was_published:
+        release.published_at = datetime.now(ZoneInfo("UTC"))
+    if not release.published:
+        release.published_at = None
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该平台版本和构建号已存在")
+    db.refresh(release)
+    return release
+
+
+@router.delete("/app-releases/{release_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_app_release(
+    release_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    release = db.get(AppRelease, release_id)
+    if not release:
+        raise HTTPException(status_code=404, detail="版本记录不存在")
+    db.delete(release)
+    db.commit()

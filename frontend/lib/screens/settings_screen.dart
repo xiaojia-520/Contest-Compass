@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../services/desktop_service.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 
@@ -45,6 +46,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool testing = false;
   bool hasStoredKey = false;
   bool obscure = true;
+  bool startupEnabled = false;
+  bool checkingUpdate = false;
   List<dynamic> usage = [];
 
   @override
@@ -57,6 +60,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final config = await widget.state.loadModelConfig();
       usage = await widget.state.api.get('/usage') as List<dynamic>;
+      startupEnabled = await DesktopService.instance.isLaunchAtStartupEnabled();
       if (config != null) {
         provider = config['provider'] as String? ?? 'custom';
         if (!presets.any((item) => item.id == provider)) provider = 'custom';
@@ -119,6 +123,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (mounted) showError(context, error);
     } finally {
       if (mounted) setState(() => testing = false);
+    }
+  }
+
+  Future<void> toggleReminders(bool value) async {
+    try {
+      await widget.state.setRemindersEnabled(value);
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (mounted) showError(context, error);
+    }
+  }
+
+  Future<void> toggleStartup(bool value) async {
+    try {
+      await DesktopService.instance.setLaunchAtStartup(value);
+      if (mounted) setState(() => startupEnabled = value);
+    } catch (error) {
+      if (mounted) showError(context, error);
+    }
+  }
+
+  Future<void> checkUpdate() async {
+    setState(() => checkingUpdate = true);
+    try {
+      final update = await widget.state.updates.check();
+      if (!mounted) return;
+      if (update == null) {
+        showSuccess(context, '当前已经是最新版本');
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: !update.mandatory,
+        builder: (context) => AlertDialog(
+          title: Text('发现新版本 ${update.version}'),
+          content: Text(update.notes.isEmpty ? '新版本已经可以下载。' : update.notes),
+          actions: [
+            if (!update.mandatory)
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('稍后'),
+              ),
+            ElevatedButton(
+              onPressed: () => widget.state.updates.openDownload(update),
+              child: const Text('前往下载'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => checkingUpdate = false);
     }
   }
 
@@ -275,27 +332,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 20),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Row(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
+                child: Column(
                   children: [
-                    Expanded(
-                      child: _Metric(label: '调用次数', value: '${usage.length}'),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      value: widget.state.remindersEnabled,
+                      onChanged: toggleReminders,
+                      secondary: const Icon(
+                        Icons.notifications_active_outlined,
+                        color: coral,
+                      ),
+                      title: const Text('比赛截止提醒'),
+                      subtitle: const Text('截止前 7 天、3 天和 1 天的上午 9:00 提醒'),
                     ),
-                    const SizedBox(
-                      height: 50,
-                      child: VerticalDivider(color: line),
-                    ),
-                    Expanded(
-                      child: _Metric(label: '成功调用', value: '$successful'),
-                    ),
-                    const SizedBox(
-                      height: 50,
-                      child: VerticalDivider(color: line),
-                    ),
-                    Expanded(
-                      child: _Metric(label: '累计 Token', value: '$totalTokens'),
+                    if (DesktopService.instance.supported)
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: startupEnabled,
+                        onChanged: toggleStartup,
+                        secondary: const Icon(Icons.power_settings_new_rounded),
+                        title: const Text('开机自启'),
+                        subtitle: const Text('默认关闭，可随时在这里更改'),
+                      ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.system_update_alt_rounded),
+                      title: const Text('版本更新'),
+                      subtitle: const Text(
+                        '检查 Android、iOS、Windows 或 macOS 新版本',
+                      ),
+                      trailing: OutlinedButton(
+                        onPressed: checkingUpdate ? null : checkUpdate,
+                        child: Text(checkingUpdate ? '检查中…' : '检查更新'),
+                      ),
                     ),
                   ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final metrics = [
+                      _Metric(label: '调用次数', value: '${usage.length}'),
+                      _Metric(label: '成功调用', value: '$successful'),
+                      _Metric(label: '累计 Token', value: '$totalTokens'),
+                    ];
+                    if (constraints.maxWidth < 520) {
+                      return Column(
+                        children: [
+                          metrics[0],
+                          const Divider(height: 28, color: line),
+                          metrics[1],
+                          const Divider(height: 28, color: line),
+                          metrics[2],
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: metrics[0]),
+                        const SizedBox(
+                          height: 50,
+                          child: VerticalDivider(color: line),
+                        ),
+                        Expanded(child: metrics[1]),
+                        const SizedBox(
+                          height: 50,
+                          child: VerticalDivider(color: line),
+                        ),
+                        Expanded(child: metrics[2]),
+                      ],
+                    );
+                  },
                 ),
               ),
             ),

@@ -39,6 +39,7 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
   late final TextEditingController teamSize;
   late final TextEditingController weeklyHours;
   bool saving = false;
+  late bool remindersEnabled;
 
   @override
   void initState() {
@@ -55,6 +56,7 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
     region = TextEditingController(text: project.region);
     teamSize = TextEditingController(text: '${project.teamSize}');
     weeklyHours = TextEditingController(text: '${project.weeklyHours}');
+    remindersEnabled = project.remindersEnabled;
   }
 
   Future<void> save() async {
@@ -74,8 +76,10 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
       ..region = region.text.trim()
       ..teamSize = int.tryParse(teamSize.text) ?? 1
       ..weeklyHours = int.tryParse(weeklyHours.text) ?? 5;
+    project.remindersEnabled = remindersEnabled;
     try {
       project = await widget.state.saveProject(project);
+      await widget.state.syncReminders();
       if (mounted) showSuccess(context, '项目资料已保存');
     } catch (error) {
       if (mounted) showError(context, error);
@@ -126,6 +130,7 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: const Color(0xFFFFFDF8),
@@ -134,6 +139,8 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
           children: [
             Text(
               project.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
             const Text('项目工作台', style: TextStyle(fontSize: 11, color: inkSoft)),
@@ -141,17 +148,33 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: ElevatedButton.icon(
-              key: const ValueKey('save-project'),
-              onPressed: saving ? null : save,
-              icon: const Icon(Icons.save_outlined, size: 19),
-              label: Text(saving ? '保存中…' : '保存资料'),
-            ),
+            padding: EdgeInsets.only(right: compact ? 6 : 16),
+            child: compact
+                ? IconButton.filled(
+                    key: const ValueKey('save-project'),
+                    tooltip: saving ? '保存中…' : '保存资料',
+                    onPressed: saving ? null : save,
+                    icon: saving
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.save_outlined),
+                  )
+                : ElevatedButton.icon(
+                    key: const ValueKey('save-project'),
+                    onPressed: saving ? null : save,
+                    icon: const Icon(Icons.save_outlined, size: 19),
+                    label: Text(saving ? '保存中…' : '保存资料'),
+                  ),
           ),
         ],
         bottom: TabBar(
           controller: tabs,
+          isScrollable: compact,
           tabs: const [
             Tab(icon: Icon(Icons.description_outlined), text: '项目资料'),
             Tab(icon: Icon(Icons.auto_awesome_rounded), text: 'AI 竞赛报告'),
@@ -173,6 +196,9 @@ class _ProjectWorkspaceState extends State<ProjectWorkspace>
             region: region,
             teamSize: teamSize,
             weeklyHours: weeklyHours,
+            remindersEnabled: remindersEnabled,
+            onRemindersChanged: (value) =>
+                setState(() => remindersEnabled = value),
             onImport: importMarkdown,
           ),
           RecommendationView(
@@ -200,6 +226,8 @@ class ProjectForm extends StatelessWidget {
     required this.region,
     required this.teamSize,
     required this.weeklyHours,
+    required this.remindersEnabled,
+    required this.onRemindersChanged,
     required this.onImport,
   });
   final TextEditingController title;
@@ -212,11 +240,13 @@ class ProjectForm extends StatelessWidget {
   final TextEditingController region;
   final TextEditingController teamSize;
   final TextEditingController weeklyHours;
+  final bool remindersEnabled;
+  final ValueChanged<bool> onRemindersChanged;
   final VoidCallback onImport;
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.all(28),
+    padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 16 : 28),
     child: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1040),
@@ -343,6 +373,14 @@ class ProjectForm extends StatelessWidget {
                         );
                       },
                     ),
+                    const SizedBox(height: 12),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      value: remindersEnabled,
+                      onChanged: onRemindersChanged,
+                      title: const Text('比赛截止提醒'),
+                      subtitle: const Text('在匹配比赛截止前 7 天、3 天和 1 天提醒'),
+                    ),
                   ],
                 ),
               ),
@@ -421,6 +459,7 @@ class _RecommendationViewState extends State<RecommendationView> {
         '/projects/${widget.projectId}/recommend',
       );
       result = Map<String, dynamic>.from(data as Map);
+      await widget.state.syncReminders();
       if (mounted) showSuccess(context, '竞赛分析报告已生成');
     } catch (error) {
       if (mounted) showError(context, error);
@@ -490,7 +529,7 @@ class _RecommendationViewState extends State<RecommendationView> {
       const SizedBox(height: 44),
     ]);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(28),
+      padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 16 : 28),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1040),
@@ -820,8 +859,10 @@ class _ChatViewState extends State<ChatView> {
                 )
               : ListView.builder(
                   controller: scroll,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: MediaQuery.sizeOf(context).width < 600
+                        ? 14
+                        : 24,
                     vertical: 28,
                   ),
                   itemCount: messages.length,
@@ -860,7 +901,12 @@ class _ChatViewState extends State<ChatView> {
         ),
         Container(
           color: const Color(0xFFFFFDF8),
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          padding: EdgeInsets.fromLTRB(
+            MediaQuery.sizeOf(context).width < 600 ? 12 : 20,
+            14,
+            MediaQuery.sizeOf(context).width < 600 ? 12 : 20,
+            20,
+          ),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 900),

@@ -49,23 +49,32 @@ class SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final heading = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: Theme.of(context).textTheme.headlineMedium),
-              if (subtitle != null) ...[
-                const SizedBox(height: 7),
-                Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
-              ],
-            ],
-          ),
-        ),
-        ?trailing,
+        Text(title, style: Theme.of(context).textTheme.headlineMedium),
+        if (subtitle != null) ...[
+          const SizedBox(height: 7),
+          Text(subtitle!, style: Theme.of(context).textTheme.bodyMedium),
+        ],
       ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (trailing != null && constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [heading, const SizedBox(height: 14), trailing!],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: heading),
+            ?trailing,
+          ],
+        );
+      },
     );
   }
 }

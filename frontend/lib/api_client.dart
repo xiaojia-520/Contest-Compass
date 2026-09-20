@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'services/app_config.dart';
+import 'services/token_storage.dart';
+
 class ApiException implements Exception {
   ApiException(this.message, [this.statusCode]);
   final String message;
@@ -12,21 +15,14 @@ class ApiException implements Exception {
 }
 
 class ApiClient {
-  ApiClient(this.preferences);
+  ApiClient(this.preferences, this.tokenStorage);
 
   final SharedPreferences preferences;
-  static const configuredBase = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: '',
-  );
+  final TokenStorage tokenStorage;
   String? token;
 
-  String get baseUrl {
-    if (configuredBase.isNotEmpty) {
-      return configuredBase.replaceAll(RegExp(r'/$'), '');
-    }
-    return '${Uri.base.origin}/api';
-  }
+  bool get hasConfiguredServer => AppConfig.hasApiBase;
+  String get baseUrl => AppConfig.apiBase;
 
   Map<String, String> get _headers => {
     'Content-Type': 'application/json; charset=utf-8',
@@ -53,6 +49,9 @@ class ApiClient {
     ),
   );
 
+  Future<dynamic> delete(String path) async =>
+      _handle(await http.delete(Uri.parse('$baseUrl$path'), headers: _headers));
+
   dynamic _handle(http.Response response) {
     final decoded = response.body.isEmpty
         ? null
@@ -67,11 +66,11 @@ class ApiClient {
 
   Future<void> saveToken(String value) async {
     token = value;
-    await preferences.setString('access_token', value);
+    await tokenStorage.write(value);
   }
 
   Future<void> clearToken() async {
     token = null;
-    await preferences.remove('access_token');
+    await tokenStorage.clear();
   }
 }

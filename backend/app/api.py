@@ -9,13 +9,14 @@ from sqlalchemy.orm import Session
 from .competition import CompetitionRepository
 from .database import get_db
 from .llm_service import LLMService, project_context
-from .models import ChatMessage, ModelConfig, Project, RecommendationRun, UsageRecord, User
+from .models import AppRelease, ChatMessage, ModelConfig, Project, RecommendationRun, UsageRecord, User
 from .retrieval import get_retrieval_service
 from .schemas import (
     ChatMessageOut,
     ChatRequest,
     ChatResponse,
     CompetitionOut,
+    LatestReleaseOut,
     LoginRequest,
     ModelConfigIn,
     ModelConfigOut,
@@ -23,10 +24,13 @@ from .schemas import (
     ProjectOut,
     ProjectUpdate,
     RecommendationOut,
+    ReminderOut,
     TokenOut,
     UsageOut,
     UserCreate,
     UserOut,
+    UserPreferencesIn,
+    UserPreferencesOut,
 )
 from .security import create_access_token, encrypt_secret, get_current_user, hash_password, verify_password
 
@@ -72,6 +76,22 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenOut:
 @router.get("/auth/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+@router.get("/preferences", response_model=UserPreferencesOut)
+def get_preferences(user: User = Depends(get_current_user)) -> UserPreferencesOut:
+    return UserPreferencesOut(reminders_enabled=user.reminders_enabled)
+
+
+@router.put("/preferences", response_model=UserPreferencesOut)
+def save_preferences(
+    payload: UserPreferencesIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserPreferencesOut:
+    user.reminders_enabled = payload.reminders_enabled
+    db.commit()
+    return UserPreferencesOut(reminders_enabled=user.reminders_enabled)
 
 
 @router.get("/model-config", response_model=ModelConfigOut | None)
@@ -299,3 +319,86 @@ async def chat(
 def usage(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(UsageRecord).where(UsageRecord.user_id == user.id).order_by(UsageRecord.id.desc()).limit(100)))
 
+
+@router.get("/reminders", response_model=list[ReminderOut])
+def reminders(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[ReminderOut]:
+    if not user.reminders_enabled:
+        return []
+    projects = list(
+        db.scalars(
+            select(Project).where(
+                Project.owner_id == user.id,
+                Project.reminders_enabled.is_(True),
+            )
+        )
+    )
+    result: list[ReminderOut] = []
+    repository = CompetitionRepository()
+    for project in projects:
+        run = db.scalar(
+            select(RecommendationRun)
+            .where(RecommendationRun.project_id == project.id)
+            .order_by(RecommendationRun.created_at.desc())
+        )
+        if not run:
+            continue
+        matches = run.report.get("matches", []) if isinstance(run.report, dict) else []
+        matched_ids = {
+            item.get("contest_id")
+            for item in matches
+            if isinstance(item, dict) and item.get("contest_id") is not None
+        }
+        ids = [item for item in run.candidate_contest_ids if not matched_ids or item in matched_ids]
+        for competition in repository.get_many(ids):
+            deadline = competition.get("register_end_at")
+            if not deadline:
+                continue
+            result.append(
+                ReminderOut(
+                    project_id=project.id,
+                    project_title=project.title,
+                    contest_id=competition["contest_id"],
+                    contest_name=competition["contest_name"],
+                    register_end_at=deadline,
+                )
+            )
+    return result
+
+
+def _version_tuple(value: str | None) -> tuple[int, int, int]:
+    parts = (value or "0.0.0").split(".")
+    parsed = [int(item) if item.isdigit() else 0 for item in parts[:3]]
+    return tuple((parsed + [0, 0, 0])[:3])
+
+
+@router.get("/app/releases/latest", response_model=LatestReleaseOut | None)
+def latest_app_release(
+    platform: str,
+    current_version: str = "0.0.0",
+    db: Session = Depends(get_db),
+):
+    if platform not in {"android", "ios", "windows", "macos", "web"}:
+        raise HTTPException(status_code=400, detail="未知客户端平台")
+    release = db.scalar(
+        select(AppRelease)
+        .where(AppRelease.platform == platform, AppRelease.published.is_(True))
+        .order_by(AppRelease.published_at.desc(), AppRelease.build_number.desc())
+    )
+    if not release:
+        return None
+    mandatory = release.mandatory or (
+        release.minimum_supported_version is not None
+        and _version_tuple(current_version) < _version_tuple(release.minimum_supported_version)
+    )
+    return LatestReleaseOut(
+        platform=release.platform,
+        version=release.version,
+        build_number=release.build_number,
+        minimum_supported_version=release.minimum_supported_version,
+        release_notes=release.release_notes,
+        download_url=release.download_url,
+        sha256=release.sha256,
+        mandatory=mandatory,
+    )
